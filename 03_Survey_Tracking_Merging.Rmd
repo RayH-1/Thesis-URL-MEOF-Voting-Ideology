@@ -1,0 +1,81 @@
+---
+title: "03_Survey_Tracking_Merging"
+output: html_document
+---
+
+# Data Import & Combining
+
+```{r}
+library(tidyverse)
+
+news <- read.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/22_trace_news_filtered_analysis.csv")
+
+survey <- read.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/11_survey_filtered.csv")
+
+imputed <- read.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/00_labeled_survey.csv")
+
+urls <- read.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/20_trace_all_filtered.csv")
+```
+
+```{r}
+uc <- urls |> select('personid','urlid', 'duration')
+nc <- news |> select('urlid', 'text_clean')
+sc <- survey |> select('personid', 'secondvote', vote_left, vote_green, vote_spd,
+                       vote_na_other, vote_fdp, vote_cdu, vote_afd,
+                       'news_proportion', 'age','ml_gender_female',
+                       'ml_married','ml_relationship', 
+                       'ml_employ','ml_degreestatus', 'ml_political_interest' )
+sl <- imputed |> select('personid', 'adjustedvote', 'polinterest', 'adjustedincome',
+                        'fgender', 'fvoceduc', 'frelationship', 'fmaritalstatus',
+                        'femployment') |>
+                 mutate(personid = as.integer(personid))
+```
+
+```{r}
+url_combined <- left_join(uc, nc, by = "urlid") |> drop_na("text_clean")
+sc_combined <-  inner_join(sc, sl, by = 'personid')
+```
+
+**We need to do some anti-joins to preserve the information from the dataset**
+
+```{r}
+aj <- anti_join(sc_combined, url_combined, by = "personid")
+```
+
+# Long Format
+
+```{r}
+master <- left_join(url_combined, sc_combined, by = "personid")
+
+master <- bind_rows(master, aj)
+```
+
+```{r}
+master |> write.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/30_merged_long.csv", row.names = FALSE)
+```
+
+# Wide Format
+
+```{r}
+# Process the data to group by personid and concatenate filtered_url_text
+url_processed <- url_combined %>%
+  group_by(personid) %>%
+  summarise( 
+    duration = sum(duration),               # Sum duration if needed
+    text_clean = paste(text_clean, collapse = " ")  
+    # Concatenate filtered_url_text
+  )
+```
+
+```{r}
+master_wide <- left_join(url_processed, sc_combined, by = "personid")
+```
+
+```{r}
+master_wide <- bind_rows(master_wide, aj)
+```
+
+```{r}
+master_wide |> write.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/31_merged_wide.csv", row.names = FALSE)
+
+```

@@ -1,0 +1,574 @@
+---
+title: "00_Data_Check_Visual"
+output: html_document
+---
+
+```{r setup, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(haven)
+library(forcats)
+library(ggplot2)
+library(rlang)
+library(descr)
+library(mice)
+library(ggridges)
+```
+
+```{r}
+load("~/Hertie School/40_Masters_Thesis/Empirical/Raw_Data/consumer_level_metrics_all_respondents_ger.RData")
+
+
+load("~/Hertie School/40_Masters_Thesis/Empirical/Raw_Data/meof_ger_df.RData")
+```
+
+# Consumer Metrics Data Check
+
+```{r}
+cm <- ger_consumer_level_metrics |> 
+  select(c(personid, total_visits_news_sites, total_visits_overall)) |> 
+  mutate(news_proportion = total_visits_news_sites / total_visits_overall)
+
+cm <- cm |> select(personid, news_proportion)
+```
+
+```{r}
+cm |> ggplot(aes(news_proportion)) +
+  geom_boxplot()
+```
+
+**Selecting the respondents who will be accidentally removed but later added back in**
+
+These people have no news visits.
+
+# Survey Data Check
+
+## German Survey Data
+
+\*Might keep for analysis, not for ML
+
+(**wave**)
+
+1.  wave\* **1**
+
+2.  personid **1**
+
+3.  gender (**1**-8)
+
+4.  birthmonth (**1**)
+
+5.  birthyear (**1**)
+
+6.  age (**5**) - *We will use wave 5 because that's the age of when they voted*
+
+7.  {voceduc (1,**2**) : ml_degreestatus} - *We will use wave 2 data here because its the most recent information*
+
+8.  {relationship (1,**2**): ml_relationship} - *We will use wave 2 data here because its the most recent information*
+
+9.  {maritalstatus (**1**): ml_married}
+
+10. {employment (1,**2**): ml_employ} - *We will use wave 2 data here because its the most recent information*
+
+11. hhincome (**2**)\*
+
+12. postcode \*
+
+13. {polinterest (1,**4**,6): ml_polinterest} - *We will use wave 4 data here because its the most recent information*
+
+14. secondvote (**5**)
+
+### **Selecting Columns**
+
+**Wave 1 Variables: Respondent Details**
+
+```{r}
+baseline <- meof_ger_df |> 
+  select(wave, personid, gender, birthmonth, birthyear, maritalstatus, postcode) |> 
+  filter(wave == 1)
+
+baseline <- baseline |> 
+  mutate(
+    fgender = as_factor(gender),
+    fmaritalstatus = as_factor(maritalstatus)
+  )
+
+```
+
+```{r}
+explore <- function(data, list_of_columns) {
+  plots <- list()  # Initialize an empty list to store the plots
+  
+  # Loop through each item in the list of columns
+  for (item in list_of_columns) {
+    
+    # Check if the column is a factor or character variable (categorical)
+    if (is.factor(data[[item]]) | is.character(data[[item]])) {
+      # Convert to factor and explicitly include NAs as a separate level
+      data[[item]] <- factor(data[[item]], exclude = NULL)
+      
+      img <- ggplot(data, aes(x = !!sym(item))) + 
+        geom_bar(fill = "steelblue", color = "black") +  # Normal bars for non-NA values
+        # Add a red bar for NA values
+        geom_bar(data = data %>% filter(is.na(!!sym(item))), 
+                 aes(x = "NA"), fill = "red", color = "black") +  
+        labs(
+          title = paste(item, "Distribution"),
+          x = item,
+          y = "Count",
+          caption = "Source: meof_ger_df"
+        ) +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1))
+        
+    } else {
+      # For numeric variables: Handle NA values separately
+      # Replace NA values with a placeholder (e.g., "Missing")
+      data[[item]] <- ifelse(is.na(data[[item]]), "Missing", as.character(data[[item]]))
+      
+      img <- ggplot(data, aes(x = !!sym(item))) + 
+        geom_bar(fill = "steelblue", color = "black") +  # Normal bars for non-NA values
+        # Add a red bar for Missing values (treated as categorical)
+        geom_bar(data = data %>% filter(!!sym(item) == "Missing"), 
+                 aes(x = !!sym(item)), fill = "red", color = "black") +  
+        labs(
+          title = paste(item, "Distribution"),
+          x = item,
+          y = "Count",
+          caption = "Source: meof_ger_df"
+        ) +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    }
+    
+    # Store each plot in the list
+    plots[[item]] <- img
+  }
+  
+  return(plots)  # Return the list of plots
+}
+
+list_of_columns <- c("fgender", "fmaritalstatus")  
+plots <- explore(baseline, list_of_columns)
+
+# To display the plots, you can either print them one by one:
+print(plots[["fgender"]])
+print(plots[["fmaritalstatus"]])
+
+```
+
+**Wave 2 Variables: Respondent Details (Most Recent)**
+
+```{r}
+w2items <- meof_ger_df |>
+  select(wave, personid, voceduc, relationship, employment) |>
+  filter(wave == 2)
+
+w2items <- w2items |> 
+  mutate(
+    fvoceduc = as_factor(voceduc),
+    frelationship = as_factor(relationship),
+    femployment = as_factor(employment)
+  )
+
+```
+
+```{r}
+list_of_columns <- c("fvoceduc", "frelationship", "femployment")  
+plots <- explore(w2items, list_of_columns)
+
+# To display the plots, you can either print them one by one:
+print(plots[["fvoceduc"]])
+print(plots[["frelationship"]])
+print(plots[["femployment"]])
+
+```
+
+**Wave 4 Variable: Interest in Politics**
+
+```{r}
+polint <- meof_ger_df |>
+  select(wave, personid, polinterest) |>
+  filter(wave == 4)
+```
+
+```{r}
+table(polint$polinterest)
+```
+
+```{r}
+polint$polinterest <- na_if(polint$polinterest, 977)
+```
+
+```{r}
+polint |> 
+  mutate(polinterest = as_factor(polinterest)) |>
+  ggplot(aes(x = polinterest)) + 
+  geom_bar(fill = "steelblue", color = "black") + 
+  labs(
+    title = "Interest in Politics",
+    x = "Interest",
+    y = "Count",
+    caption = "Source: meof_ger_df"
+  ) +
+  theme_minimal() + 
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    plot.title = element_text(hjust = 0.5) 
+  )
+
+
+```
+
+**Wave 5 Variable: Voting Behavior**
+
+```{r}
+voting <- meof_ger_df |>
+  filter(wave == 5, !is.na(voted_2017)) |>
+  select(personid, age, secondvote)
+```
+
+```{r}
+table(voting$secondvote)
+```
+
+```{r}
+voting$secondvote <- na_if(voting$secondvote, 977)
+voting$secondvote <- na_if(voting$secondvote, 7)
+```
+
+```{r}
+voting |>
+  filter(secondvote != 977 & secondvote != 7 & !is.na(secondvote)) |>
+  mutate(secondvote = as_factor(secondvote)) |>
+  ggplot(aes(x = secondvote)) + 
+  geom_bar(fill = "steelblue", color = "black") + 
+  labs(
+    title = "Vote in Federal Election",
+    x = "Party",
+    y = "Count",
+    caption = "Source: meof_ger_df"
+  ) +
+  theme_minimal() + 
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    plot.title = element_text(hjust = 0.5) 
+  )
+```
+
+```{r}
+voting <- voting |>
+  mutate(
+    adjustedvote = case_when(
+      secondvote == 5 ~ -3,
+      secondvote == 4 ~ -2,
+      secondvote == 2 ~ -1,
+      secondvote %in% c(7, 997) | is.na(secondvote) ~ 0,
+      secondvote == 3 ~ 1,
+      secondvote == 1 ~ 2,
+      secondvote == 6 ~ 3,
+      TRUE ~ 0
+    ),
+    adjustedvotelr = case_when(
+      secondvote == 5 ~ -1,
+      secondvote == 4 ~ -1,
+      secondvote == 2 ~ -1,
+      secondvote %in% c(7, 997) | is.na(secondvote) ~ 0,
+      secondvote == 3 ~ 1,
+      secondvote == 1 ~ 1,
+      secondvote == 6 ~ 1,
+      TRUE ~ 0
+  ))
+
+```
+
+```{r}
+voting |>
+  ggplot(aes(x = factor(adjustedvote))) +  # Convert to factor to ensure all labels appear
+  geom_bar(fill = "steelblue", color = "black") + 
+  labs(
+    title = "Vote in Federal Election (Readjusted)",
+    subtitle = "Larger Negative Numbers = 'More Left Wing' | Larger Positive Numbers = 'More Right Wing'",
+    x = "Party",
+    y = "Count",
+    caption = "Source: meof_ger_df"
+  ) +
+  theme_minimal() + 
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)  # Rotate x labels for better readability
+  )
+
+```
+
+```{r}
+voting |>
+  ggplot(aes(x = factor(adjustedvotelr))) +  # Convert to factor to ensure all labels appear
+  geom_bar(fill = "steelblue", color = "black") + 
+  labs(
+    title = "Vote in Federal Election (Readjusted)",
+    subtitle = "Larger Negative Numbers = 'More Left Wing' | Larger Positive Numbers = 'More Right Wing'",
+    x = "Party",
+    y = "Count",
+    caption = "Source: meof_ger_df"
+  ) +
+  theme_minimal() + 
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)  # Rotate x labels for better readability
+  )
+```
+
+**Wave 2 Variable: Income (Most Recent)**
+
+```{r}
+income <- meof_ger_df |>
+  select(wave, personid, hhincome) |>
+  filter(wave == 2) |>
+  select(!wave)
+```
+
+```{r}
+
+levels(income$hhincome)
+table(income$hhincome)
+```
+
+```{r}
+income <- income |> mutate(
+  hhincome = as.numeric(as.character(hhincome)),  # Ensure pincome is numeric
+  adjustedincome = case_when(
+    hhincome == 13 ~ NA,
+    is.na(hhincome) ~ NA,
+    TRUE ~ hhincome
+  )
+)
+
+income |>
+  ggplot(aes(x = factor(adjustedincome))) +  # Convert to factor for proper labeling
+  geom_bar(fill = "darkgreen", color = "black") + 
+  labs(
+    title = "Household Income",
+    x = "Income",
+    y = "Count",
+    caption = "Source: meof_ger_df"
+  ) +
+  theme_minimal() + 
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)  # Rotate labels
+  )
+
+
+```
+
+### Rejoining the Tables
+
+```{r}
+
+survey <- left_join(voting, baseline, by = "personid")
+
+survey <- left_join(survey, cm , by = "personid")
+
+survey <- left_join(survey, w2items, by = "personid")
+
+survey <- left_join(survey, polint , by = "personid")
+
+survey <- left_join(survey, income, by = "personid")
+
+```
+
+## Handling NA Values
+
+Note: This is from 03_Survey_Tracking_Merging output.
+
+```{r}
+
+master <- read.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/31_merged_wide.csv")
+
+```
+
+```{r}
+#survey <- survey |> filter(personid %in% master$personid | personid %in% nonews$personid)
+
+```
+
+```{r}
+survey <- survey |> 
+  select(-wave.x, -wave.y) |> 
+  mutate(news_proportion = ifelse(is.na(news_proportion), 0, news_proportion))
+
+# Count NAs per column
+na_counts <- data.frame(sapply(survey, function(x) sum(is.na(x))))
+
+# View the result
+na_counts
+
+
+```
+
+```{r}
+# List of columns to plot
+list_of_columns <- c("secondvote", "voceduc", "relationship", "employment", 
+                     "fvoceduc", "frelationship", "femployment", 
+                     "polinterest", "hhincome", "adjustedincome")
+
+# Generate the plots
+plots <- explore(survey, list_of_columns)
+
+print(plots[["secondvote"]])
+print(plots[["voceduc"]])
+print(plots[["relationship"]])
+print(plots[["employment"]])
+print(plots[["polinterest"]])
+print(plots[["hhincome"]])
+print(plots[["adjustedincome"]])
+
+```
+
+```{r, echo = T, results = 'hide'}
+survey$secondvote[is.na(survey$secondvote)] <- 0
+
+library(Hmisc)
+
+# Impute missing values using the median for all columns in the dataset
+imputed <- as.data.frame(lapply(survey, function(x) impute(x, fun = median)))
+
+```
+
+```{r}
+# List of columns to plot
+list_of_columns <- c("secondvote", "voceduc", "relationship", "employment", 
+                     "fvoceduc", "frelationship", "femployment", 
+                     "polinterest", "hhincome", "adjustedincome")
+
+# Generate the plots
+plots <- explore(imputed, list_of_columns)
+
+print(plots[["secondvote"]])
+print(plots[["voceduc"]])
+print(plots[["relationship"]])
+print(plots[["employment"]])
+print(plots[["polinterest"]])
+print(plots[["hhincome"]])
+print(plots[["adjustedincome"]])
+```
+
+```{r}
+# Count NAs per column
+na_post <- data.frame(sapply(imputed, function(x) sum(is.na(x))))
+
+# View the result
+na_post
+```
+
+# Visualizing Relationships
+
+```{r}
+imputed |> 
+  mutate(secondvote = as_factor(secondvote)) |>
+  filter(secondvote != "Andere Partei" & secondvote != "977") |>
+  ggplot(aes(x = adjustedincome, y = secondvote)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")
+
+
+
+
+```
+
+```{r}
+imputed |> 
+  mutate(secondvote = as_factor(secondvote)) |> 
+  filter(secondvote != "Andere Partei" & secondvote != "977") |>
+  ggplot(aes(x = age, y = secondvote)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")
+```
+
+```{r}
+imputed |> 
+  mutate(secondvote = as_factor(secondvote)) |> 
+  filter(secondvote != "Andere Partei" & secondvote != "977") |>
+  ggplot(aes(x = birthyear, y = secondvote)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")
+```
+
+```{r}
+imputed |> 
+  mutate(
+    secondvote = as_factor(secondvote),
+    polinterest = as.factor(polinterest)
+  ) |>  # Ensure polinterest is a factor
+  filter(secondvote != "Andere Partei" & secondvote != "977") |>  # Filter out specific secondvote values
+  ggplot(aes(x = secondvote, fill = secondvote)) +  # Use secondvote for x-axis and fill by secondvote
+  geom_bar(aes(y = after_stat(count)), position = "dodge") +  # Position bars side by side
+  facet_wrap(~polinterest) +  # Create facets for each level of polinterest
+  scale_fill_manual(
+    values = c(
+      "AfD" = "lightblue", 
+      "Die Linke" = "purple", 
+      "FDP" = "yellow", 
+      "SPD" = "red", 
+      "CDU/CSU" = "blue", 
+      "B?ndnis 90/Die Gr?nen" = "green",
+      "Other" = "gray"  # Color for all other categories
+    )
+  ) +
+  theme_minimal() +  # Use a minimal theme for clarity
+  theme(
+    legend.position = "none",  # Remove the legend
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels for better readability
+  ) +
+  labs(x = "Second Vote", y = "Count")  # Add axis labels
+
+
+
+
+```
+
+```{r}
+imputed |> 
+  mutate(
+    secondvote = as_factor(secondvote),
+    polinterest = as_factor(voceduc)
+  ) |>  # Ensure polinterest is a factor
+  filter(secondvote != "Andere Partei" & secondvote != "977") |>  # Filter out specific secondvote values
+  ggplot(aes(x = secondvote, fill = secondvote)) +  # Use secondvote for x-axis and fill by secondvote
+  geom_bar(aes(y = after_stat(count)), position = "dodge") +  # Position bars side by side
+  facet_wrap(~voceduc) +  # Create facets for each level of polinterest
+  scale_fill_manual(
+    values = c(
+      "AfD" = "lightblue", 
+      "Die Linke" = "purple", 
+      "FDP" = "yellow", 
+      "SPD" = "red", 
+      "CDU/CSU" = "blue", 
+      "B?ndnis 90/Die Gr?nen" = "green",
+      "Other" = "gray"  # Color for all other categories
+    )
+  ) +
+  theme_minimal() +  # Use a minimal theme for clarity
+  theme(
+    legend.position = "none",  # Remove the legend
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels for better readability
+  ) +
+  labs(x = "Second Vote", y = "Count")  # Add axis labels
+```
+
+```{r}
+imputed |> 
+  ggplot(aes(x = factor(secondvote), y = log(news_proportion))) +
+  geom_boxplot()
+
+
+
+```
+
+# Write to CSV
+
+```{r}
+imputed |> write.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/00_labeled_survey.csv", row.names = FALSE)
+```

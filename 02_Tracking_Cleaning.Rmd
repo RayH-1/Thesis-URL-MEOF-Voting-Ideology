@@ -1,0 +1,354 @@
+---
+title: "02_Tracking_Cleaning"
+author: "Ray Hossain"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+```
+
+# Load Data
+
+```{r}
+
+load("~/Hertie School/40_Masters_Thesis/Empirical/Raw_Data/ger_pulse_news_jul2017_dec2017.RData")
+# First, check the current dataframe structure
+head(tracking_df_ger_news)
+
+```
+
+**Load the survey data which as already been cleaned to include the respondents we are interested in (from wave 5).**
+
+```{r}
+survey <- read.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/11_survey_filtered.csv")
+head(survey)
+```
+
+```{r}
+survey <- survey |> mutate(personid = as.character(personid))
+
+tracking_survey <- tracking_df_ger_news |> filter(personid %in% survey$personid)
+```
+
+**Modify the tracking_survey to include only dates before the election.**
+
+```{r}
+# Define the cutoff date
+cutoff_date <- as.POSIXct("2017-09-24 00:00:00")
+
+# Filter rows where date is before the cutoff
+filtered_data <- tracking_survey |> filter(used_at < cutoff_date)
+```
+
+```{r}
+#filtered_data |> write.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/20_trace_all_filtered.csv")
+```
+
+# Clean Data
+
+```{r}
+unique_tracking_df <- filtered_data |> distinct(urlid, .keep_all = TRUE)
+```
+
+1.  **Create a new column that only keeps URLs with paths after the / (i.e. informative URLs with extensions)**
+
+```{r}
+# This checks for domain.tld/ followed by something
+filtered_tracking_df <- unique_tracking_df[grepl("^(?:https?://)?(?:www\\.)?[^/]+\\.[^/]+/[^/].*", unique_tracking_df$url), ]
+
+# Check the results
+head(filtered_tracking_df)
+nrow(filtered_tracking_df)
+nrow(unique_tracking_df)
+```
+
+2.  **Create a new column that is only the URL extensions after the second slash /**
+
+If there are fewer than two slashes, check for dashes (-) or plus signs (+) after the first slash. This is because - represent spaces and + represent search queries. Although (=) and (\_) may also be useful, we will exclude them because after checking, a lot of bad or uninformative links use those two.
+
+```{r}
+# Create a new column 'url_text' that extracts the string after the second slash (/)
+filtered_tracking_df$url_text <- sapply(filtered_tracking_df$url, function(url) {
+  # Split the URL by slashes
+  parts <- unlist(strsplit(url, "/"))
+  
+  # Check if there are at least 3 parts (i.e., at least two slashes)
+  if (length(parts) >= 3) {
+    # Combine parts after the second slash
+    paste(parts[3:length(parts)], collapse = "/")
+  } else {
+    # If there are fewer than two slashes, check for dashes (-) or plus signs (+) after the first slash. 
+    if (length(parts) == 2 && grepl("[-+]", parts[2])) {
+      # Include the part after the first slash if it contains dashes or plus signs
+      parts[2]
+    } else {
+      # Return an empty string if there are no dashes, plus signs, or fewer than two slashes
+      ""
+    }
+  }
+})
+```
+
+3.  **Create a new column cleaning the extensions to remove added baggage**
+
+```{r}
+# Create a new column 'filtered_url_text' by processing 'url_text'
+filtered_tracking_df$filtered_url_text <- sapply(filtered_tracking_df$url_text, function(url) {
+  # Step 1: Replace '/' with spaces
+  url <- gsub("/", " ", url)
+  
+  # Step 2: Remove numbers with more than 4 digits (i.e., 5 or more digits)
+  url <- gsub("\\d{5,}", "", url)  # Remove numbers with 5 or more digits
+  
+  # Step 3: Remove all special characters (keep only letters, numbers, and spaces)
+  url <- gsub("[^a-zA-Z0-9\\s]", " ", url)
+  
+  # Step 4: Remove extra spaces created by the replacements
+  url <- gsub("\\s+", " ", url)  # Replace multiple spaces with a single space
+  url <- trimws(url)  # Remove leading and trailing spaces
+  
+  # Step 5: Convert to lowercase
+  url <- tolower(url)
+  
+  # Return the processed URL text
+  return(url)
+})
+
+```
+
+4.  **Checking to see if any important URLs were removed in this process**
+
+```{r}
+new_df <- filtered_tracking_df |>
+  filter(url_text == "") 
+```
+
+5.  **Lets fix the text column so that it registers dates properly.**
+
+```{r}
+library(dplyr)
+library(stringr)
+
+# Function to replace spaces with hyphens in specific number patterns
+format_dates <- function(text) {
+  # Define the allowed patterns
+  text <- str_replace_all(text, "(\\b\\d{2}) (\\d{2}\\b)", "\\1-\\2") %>%  # Two digits followed by two digits
+    str_replace_all("(\\b\\d{4}) (\\d{2}\\b)", "\\1-\\2") %>%              # Four digits followed by two digits
+    str_replace_all("(\\b\\d{2}) (\\d{4}\\b)", "\\1-\\2")                  # Two digits followed by four digits
+  
+  return(text)
+}
+
+# Apply the function to the specified column(s)
+filtered_tracking_df <- filtered_tracking_df |>
+  mutate(across(filtered_url_text, format_dates))
+```
+
+# Explore Data
+
+```{r}
+# Load necessary libraries
+library(wordcloud)
+library(RColorBrewer)
+
+# Define a list of common German filler words to remove
+german_filler <- c(
+  "der", "die", "das", "und", "in", "den", "von", "zu", "mit", "sich", 
+  "des", "ist", "im", "dem", "nicht", "ein", "auch", "auf", "für", "an", 
+  "als", "am", "aus", "bei", "durch", "er", "es", "hat", "haben", "ich", 
+  "nach", "noch", "nur", "oder", "sie", "so", "sind", "über", "um", "wir", 
+  "wie", "wird", "wurde", "wurden", "aber", "doch", "einen", "einer", "eines", 
+  "man", "mehr", "schon", "sehr", "vor", "wenn", "werden", "wie", "wieder", 
+  "will", "wo", "während", "wegen", "weil", "welche", "welcher", "welches",
+  "dass", "mehr", "ohne", "wurde", "worden", "dabei", "sowie", "fuer", "wosuch")
+
+# Define additional words to remove
+extra_words_to_remove <- c(
+  # Original words
+  "html", "html5", "utm", "id", "na", "php", "pdf", "jpg", "png", "css", 
+  "js", "xml", "json", "de", "zip", "txt", "csv", "mp4", "assets", "static", 
+  "en", "images", "media", "files", "docs", "downloads", "content", "uploads", 
+  "page", "source", "category", "section", "view", "sort", "filter", "lang", 
+  "utm_source", "utm_medium", "ref", "type", "token", "index", "default", 
+  "login", "auth", "api", "config", "ajax", "404", "callback", "request", 
+  "popup", "live", "tv", "la", "nid", "ard", "article", "livestreaming", "search", 
+  "bild", "101", "start", "videos", "ts", "fc", "nl", "wtrid", "video",
+  "livevideo","is", "startseite", "zdf", "directsearch", "did", "here", "as",
+  "step","fromsearch", "documentid", "htm", "gid", "pid", "nr", "loginid", "login",
+  "parentId", "id", "Http", "www", "medium", "facebook", "startseite", 
+  "newsletter", "seite", "newcomment", "comment", "session", "dmcid", "zdf",
+  "zgt", "logout", "login", "fcbklnkdehpmg", "gzsz","bcastid","cid", "sess",
+  "welt", "comment", "comments",
+  
+  # New "id" words to remove
+  "2bseid", "userid", "mid", "ncid", "tid", "mediagalid", "lid", "zid", "linkid",
+  "bmrecipientid", "bmrecipientlistid", "remid", "fid", "toid", "cmpid", "rubricid",
+  "xid", "parentid", "sid", "emnid", "mpdid", "vid", "authid", "privcapid", "ghaid",
+  "icid", "26plid", "artid", "storyid", "rid", "3fgid", "26smid", "forid", "dossierid",
+  "gclid", "uuid", "2bcid", "3fsmid", "contentcontextid", "sourceid", "surveyid",
+  "itemid", "bffbvid", "sdpgid", "mcid", "omid", "iid", "mktcid", "navid",
+  "onlinerubricid", "payerid", "hvid", "cvid", "productid", "2526apid", "sigrid",
+  "onemediavid", "5bpid", "5bdetailpid", "5brid", "5ballarticlespid", "5bcategoryid",
+  "5bceuid", "uid", "tickerid", "mbid", "devid", "5buid", "jsessionid", "siteid",
+  "backlinkid", "auid", "rfid", "reid", "videoid", "suid", "conid", "ptid", "galid",
+  "catalogid", "articleid", "searchid", "veedid", "qid", "253fcatalogid", "tvliveid",
+  "2fpid", "26toolid", "26campid", "26customid", "26vectorid", "3ftrackid", "gittikid",
+  "smid", "vidid", "fazsubressortid", "ajaxelementid", "dclid", "tbid", "poid",
+  "lefloid", "klid", "categoryid", "meineid", "oid", "jesid", "arvid", "issueid",
+  "bctid", "kxcid", "paymentid", "riesenkleid", "hpid", "catid", "pageid", "pushid",
+  "nlid", "void", "odroid", "moveaid", "invalid", "bcpid", "bclid", "luid", "suggid",
+  "squalid", "donioid", "locationid", "drid", "ocid", "locid", "tabid", "placid"
+)
+
+
+# Define a list of single-letter words to remove (entire alphabet)
+single_letters <- c("a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z")
+
+single_numbers <- as.character(c(0:9))
+
+# Combine all words to remove into a single vector
+words_to_remove <- c(german_filler, extra_words_to_remove, single_letters, single_numbers)
+
+# Extract all words from the 'filtered_url_text' column
+all_words <- unlist(strsplit(filtered_tracking_df$filtered_url_text, "\\s+"))
+
+# Remove empty strings (if any)
+all_words <- all_words[all_words != ""]
+
+# Filter out unwanted words (German filler, extra words, and single letters)
+filtered_words <- all_words[!all_words %in% words_to_remove]
+
+# Create a frequency table of the filtered words
+word_freq <- table(filtered_words)
+
+# Sort the frequency table in descending order
+word_freq <- sort(word_freq, decreasing = TRUE)
+
+# Convert to a dataframe for easier handling
+word_freq_df <- data.frame(word = names(word_freq), freq = as.numeric(word_freq))
+
+# Generate a word cloud of the top 75 words
+wordcloud(words = word_freq_df$word, freq = word_freq_df$freq, max.words = 75, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
+```
+
+```{r}
+# Create a dataframe of the most common words and their counts
+word_freq_df <- data.frame(
+  word = names(sort(table(all_words[!all_words %in% words_to_remove & all_words != ""]), decreasing = TRUE)),
+  freq = as.numeric(sort(table(all_words[!all_words %in% words_to_remove & all_words != ""]), decreasing = TRUE))
+)
+
+# Display the top 20 most common words
+head(word_freq_df, 20)
+```
+
+```{r}
+total_news <- sum(filtered_tracking_df$news_domain == TRUE)/nrow(filtered_tracking_df)
+
+print(total_news)
+```
+
+It doesn't look like we have any "False" under "news_domain. So its likely we don't have any "propaganda sources".
+
+```{r}
+sum(word_freq_df$freq)
+```
+
+```{r}
+count(word_freq_df)
+```
+
+There are approximately unique 1M "words" in the dataset which would result in about 106K words
+
+# Final Modifications
+
+```{r}
+# Create a new dataframe with the desired columns
+news_llm_df <- data.frame(
+  urlid = filtered_tracking_df$urlid,  
+  duration = filtered_tracking_df$duration,  
+  domain = filtered_tracking_df$domain,  
+  filtered_url_text = filtered_tracking_df$filtered_url_text 
+)
+
+news_llm_df <- news_llm_df |> filter(filtered_url_text != "", .keep=TRUE)
+
+
+```
+
+```{r}
+# Function 1: Convert sentences to lists of words
+convert_to_word_list <- function(df) {
+  df$list_words <- strsplit(df$filtered_url_text, "\\s+")
+  return(df)
+}
+
+# Function 2: Remove specific words from the lists
+remove_words <- function(df, words_to_remove) {
+  df$list_words <- lapply(df$list_words, function(word_list) {
+    word_list[!word_list %in% words_to_remove]
+  })
+  return(df)
+}
+
+# Function 3: Convert lists back to sentences
+convert_to_sentence <- function(df) {
+  df$text_clean <- sapply(df$list_words, paste, collapse = " ")
+  return(df)
+}
+
+# Example usage:
+# Assuming you have news_llm_df and words_to_remove already defined:
+news_llm_df <- convert_to_word_list(news_llm_df)
+```
+
+```{r}
+news_llm_df <- remove_words(news_llm_df, words_to_remove)
+```
+
+```{r}
+news_llm_df <- convert_to_sentence(news_llm_df)
+```
+
+```{r}
+news_llm_df <- news_llm_df |> select(-filtered_url_text, -list_words)
+```
+
+Remove words that are numbers + words
+
+```{r}
+library(stringr)
+
+# 1) Convert each sentence into a list of words (strings)
+news_llm_df$word_lists <- lapply(news_llm_df$text_clean, function(x) {
+  unlist(str_split(x, "\\s+"))  # Split on whitespace
+})
+
+# 2) Remove strings where letters and numbers are combined
+news_llm_df$word_lists <- lapply(news_llm_df$word_lists, function(words) {
+  # Keep only words that don't have letters and numbers mixed
+  words[!str_detect(words, "(?=\\w*\\d)(?=\\w*[a-zA-Z])\\w+")]
+})
+
+# 3) Recombine the cleaned word lists back into sentences
+news_llm_df$text_clean <- sapply(news_llm_df$word_lists, function(words) {
+  paste(words, collapse = " ")
+})
+
+# Optional: Remove the temporary word_lists column if you don't need it
+ news_llm_df$word_lists <- NULL
+```
+
+# Write to File
+
+```{r}
+# Write the dataframe to a CSV file
+write.csv(news_llm_df, file = "~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/22_trace_news_filtered_analysis.csv", row.names = FALSE)
+
+```
+
+```{r}
+
+write.csv(word_freq_df, file = "~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/221_trace_news_filtered_extension_words.csv")
+```

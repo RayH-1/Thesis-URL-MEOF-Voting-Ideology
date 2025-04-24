@@ -1,0 +1,409 @@
+---
+title: "Data_Columns"
+author: "Ray Hossain"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(haven)
+library(forcats)
+```
+
+```{r}
+load("~/Hertie School/40_Masters_Thesis/Empirical/Raw_Data/consumer_level_metrics_all_respondents_ger.RData")
+
+
+load("~/Hertie School/40_Masters_Thesis/Empirical/Raw_Data/meof_ger_df.RData")
+```
+
+# Data Objectives (Feature Selection)
+
+## Consumer Data
+
+-   personid
+
+-   total_visits_overall
+
+-   total_visits_news_sites
+
+-   {CREATE: news_proportion= total visits news sites / total visits overall}
+
+```{r}
+ger_consumer_level_metrics |> colnames() |> data.frame()
+```
+
+```{r, ignore = True}
+cm <- ger_consumer_level_metrics |> 
+  select(c("personid", "total_visits_news_sites","total_visits_overall")) |> 
+  mutate(news_proportion = total_visits_news_sites / total_visits_overall)
+
+cm <- cm |> select(personid, news_proportion)
+
+#cm |> write.csv("10_consumer_metrics.csv")
+
+```
+
+## German Tracking Data
+
+Keep all. For more details, check Cleaning.Rmd.
+
+```{r}
+#tracking_df_ger_news |> colnames() |> as.data.frame()
+```
+
+## German Survey Data
+
+\*Might keep for analysis, not for ML
+
+(**wave**)
+
+1.  wave\* **1**
+
+2.  personid **1**
+
+3.  gender (**1**-8)
+
+4.  birthmonth (**1**)
+
+5.  birthyear (**1**)
+
+6.  age (**5**) - *We will use wave 5 because that's the age of when they voted*
+
+7.  {voceduc (1,**2**) : ml_degreestatus} - *We will use wave 2 data here because its the most recent information*
+
+    -   1,2,3,4,6 -\> 0 No degree
+
+    -   5 -\> 1 Degree
+
+8.  {relationship (1,**2**): ml_relationship} - *We will use wave 2 data here because its the most recent information*
+
+    -   3,4,5 -\> 0 No relationship
+
+    -   1,2 -\> 1 In a relationship
+
+9.  {maritalstatus (**1**): ml_married}
+
+    -   2 -\> 1 Married
+
+    -   1,3,4,5,6,7,8 -\> 0 Not Married
+
+10. {employment (1,**2**): ml_employ} - *We will use wave 2 data here because its the most recent information*
+
+    -   1 -\> 1 employed
+
+    -   all others -\> 0 unemployed
+
+11. pincome (**6**)\*
+
+12. postcode \*
+
+13. {polinterest (1,**4**,6): ml_polinterest} - *We will use wave 4 data here because its the most recent information*
+
+    -   1,2, 3, 6 -\> 0 Low in politics
+
+        -   We are setting everything below outright interest as low interest
+
+    -   4,5 -\> 1 high interest in politics
+
+14. {voted_2017 (**5**): ml_vote}
+
+    -   1 -\> 1 Voted
+
+    -   2,3,4 -\> 0 Did not vote
+
+15. firstvote (**5**)
+
+16. secondvote (**5**)
+
+```{r}
+meof_ger_df |> colnames() |> as.data.frame()
+```
+
+```{r}
+voters <- meof_ger_df |> 
+  select(wave, voted_2017, secondvote) |>
+  filter(wave == 5, voted_2017 == 1)
+```
+
+**Checking whether I want work status or employment as an indicator**
+
+```{r}
+e1 <- meof_ger_df |> 
+  select(workstatus, wave) |> 
+  filter(wave %in% c(1, 2)) |>  # Filter for wave 1 or 2
+  count(workstatus)
+
+# Create a bar plot
+barplot(e1$n, names.arg = e1$workstatus, xlab = "Work Status", ylab = "Count", main = "Work Status Distribution")
+```
+
+```{r}
+e2 <- meof_ger_df |> 
+  select(employment, wave) |> 
+  filter(wave %in% c(1, 2)) |>  # Filter for wave 1 or 2
+  count(employment) 
+
+# Create a bar plot
+barplot(e2$n, names.arg = e2$employment, xlab = "Employment", ylab = "Count", main = "Work Status Distribution")
+```
+
+Choosing employment because it has more values.
+
+### **Selecting Columns**
+
+**Wave 1 Variables: Respondent Details**
+
+```{r}
+baseline <- meof_ger_df |> 
+  select(wave, personid, gender, birthmonth, birthyear, maritalstatus, postcode) |> 
+  filter(wave == 1)
+
+```
+
+```{r}
+baseline |> distinct(gender)
+baseline |> distinct(maritalstatus)
+```
+
+```{r}
+b2 <- baseline |> select(!wave) |>
+  mutate(
+    ml_married = factor(      
+      case_when(
+        zap_labels(maritalstatus) == 2 ~ 1,
+        zap_labels(maritalstatus) != 2 ~ 0
+      ),
+      levels = c(0, 1)),
+    ml_gender_female = factor(      
+      case_when(
+        zap_labels(gender) == 2 ~ 1,
+        zap_labels(gender) != 2 ~ 0
+      ),
+      levels = c(0, 1)      
+    )
+  ) 
+
+b3 <- b2 |> select(personid, ml_gender_female, ml_married)
+  
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(b2, aes(x = ml_married)) +
+  geom_bar(fill = "lightblue") +
+  labs(title = "Distribution of Marital Status",
+       x = "Marital Status",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+**Wave 2 Variables: Respondent Details (Most Recent)**
+
+```{r}
+w2items <- meof_ger_df |>
+  select(wave, personid, voceduc, relationship, employment) |>
+  filter(wave == 2)
+```
+
+```{r}
+w2items |> distinct(voceduc)
+w2items |> distinct(relationship)
+w2items |> distinct(employment)
+```
+
+Recoding the variables
+
+```{r}
+
+w2 <- w2items |> select(!wave) |>
+  mutate(
+    # Create ml_degreestatus as a factor with numeric levels
+    ml_degreestatus = factor(
+      case_when(
+        zap_labels(voceduc) == 5 ~ 1,
+        zap_labels(voceduc) != 5 ~ 0
+      ),
+      levels = c(0, 1) 
+    ),
+    
+    # Create ml_relationship as a factor with numeric levels
+    ml_relationship = factor(
+      case_when(
+        zap_labels(relationship) %in% c(1, 2) ~ 1,  # In a relationship
+        zap_labels(relationship) >= 3 ~ 0            # Not in a relationship
+      ),
+      levels = c(0, 1)  
+    ),
+    
+    # Create ml_employ as a factor with numeric levels
+    ml_employ = factor(
+      case_when(
+        zap_labels(employment) == 1 ~ 1,  # Employed
+        zap_labels(employment) != 1 ~ 0   # Not employed
+      ),
+      levels = c(0, 1)  
+  )) 
+
+mlw2 <- data.frame(
+  personid = w2$personid,
+  ml_relationship = w2$ml_relationship,
+  ml_employ = w2$ml_employ,
+  ml_degreestatus = w2$ml_degreestatus
+)
+
+```
+
+```{r}
+# Plot ml_degreestatus
+p1 <- ggplot(mlw2, aes(x = ml_degreestatus)) +
+  geom_bar(fill = "lightblue") +
+  labs(title = "Distribution of Degree",
+       x = "Degree Status",
+       y = "Frequency") +
+  theme_minimal()
+
+# Plot ml_relationship
+p2 <- ggplot(mlw2, aes(x = ml_relationship)) +
+  geom_bar(fill = "lightgreen") +
+  labs(title = "Distribution of Relationship",
+       x = "Relationship Status",
+       y = "Frequency")+
+  theme_minimal()
+
+# Plot ml_employ
+p3 <- ggplot(mlw2, aes(x = ml_employ)) +
+  geom_bar(fill = "lightcoral") +
+  labs(title = "Distribution of Employment",
+       x = "Employment Status",
+       y = "Frequency") +
+  theme_minimal()
+
+# Display all plots
+library(patchwork)  # For arranging plots
+p1 + p2 + p3
+```
+
+**Wave 4 Variable: Interest in Politics**
+
+```{r}
+polint <- meof_ger_df |>
+  select(wave, personid, polinterest) |>
+  filter(wave == 4)
+```
+
+```{r}
+
+mlw4 <- polint |> select(!wave) |>
+  mutate(
+    ml_political_interest = factor(
+      case_when(
+        !zap_labels(polinterest) %in% c(4, 5) ~ 0,
+        zap_labels(polinterest) %in% c(4, 5) ~ 1
+      ),
+      levels = c(0, 1)  # Define the levels explicitly
+    )
+  ) |> select(!polinterest) #Get rid of the non-ml
+```
+
+```{r}
+ggplot(mlw4, aes(x = ml_political_interest)) +
+  geom_bar(fill = "lightblue") +
+  labs(title = "Distribution of Interest",
+       x = "Political Interest",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+**Wave 5 Variable: Voting Behavior**
+
+```{r}
+#voting <- meof_ger_df |>
+#  select(wave, personid, age, secondvote) |>
+#  filter(wave == 5) |>
+#  select(!wave)
+```
+
+```{r}
+voting <- meof_ger_df |>
+  filter(wave == 5, !is.na(voted_2017)) |>
+  select(personid, age, secondvote) 
+```
+
+```{r}
+voting |> distinct(secondvote) 
+```
+
+Modifying so that it is one-hot encoded
+
+```{r}
+ml_voting <- voting |>
+  mutate(
+    vote_cdu = ifelse(secondvote == 1 & !is.na(secondvote), 1, 0),
+    vote_spd = ifelse(secondvote == 2 & !is.na(secondvote), 1, 0),
+    vote_fdp = ifelse(secondvote == 3 & !is.na(secondvote), 1, 0),
+    vote_green = ifelse(secondvote == 4 & !is.na(secondvote), 1, 0),
+    vote_left = ifelse(secondvote == 5 & !is.na(secondvote), 1, 0),
+    vote_afd = ifelse(secondvote == 6 & !is.na(secondvote), 1, 0),
+    vote_na_other = ifelse(secondvote %in% c(7, 997) | is.na(secondvote), 1, 0)
+  )
+```
+
+**Wave 6 Variable: Income (Most Recent)**
+
+```{r}
+income <- meof_ger_df |>
+  select(wave, personid, pincome) |>
+  filter(wave == 6) |>
+  select(!wave)
+```
+
+### Rejoining the Tables
+
+```{r}
+
+survey <- left_join(ml_voting, b3, by = "personid")
+
+survey <- left_join(survey, cm, by = "personid")
+
+survey <- left_join(survey, mlw2, by = "personid")
+
+survey <- left_join(survey, mlw4, by = "personid")
+
+#survey <- left_join(survey, income, by = "personid")
+
+```
+
+```{r}
+#sapply(survey, class)
+```
+
+Change the NAs to 7, change the second vote column to have an "other" category.
+
+```{r}
+survey <- survey |>
+  mutate(across(-secondvote, ~ replace(., is.na(.), 0)))
+
+survey <- survey %>%
+  mutate(secondvote = case_when(
+    secondvote == 977 | secondvote == 7 | is.na(secondvote) ~ 7,
+    TRUE ~ secondvote
+  ))
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(survey, aes(x = secondvote)) +
+  geom_bar(fill = "lightblue") +
+  labs(title = "Distribution of Vote",
+       x = "Vote",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+```{r}
+survey |> write.csv("~/Hertie School/40_Masters_Thesis/Empirical/Processed_Data/11_survey_filtered.csv")
+
+```
