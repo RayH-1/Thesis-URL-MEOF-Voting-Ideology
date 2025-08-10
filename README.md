@@ -5,6 +5,7 @@
 The goal of this project is to determine if the digital trace information and personal demographic information can be used to predict whether an individual will vote for a specific party in an upcoming election. If not, the goal then is to determine if the same information can deduce voter ideology. It builds on existing research by looking at news sources, specifically headlines, at the URL and individual levels. 
 
 The code can be broken up into various sections:
+
 **Initial Data Cleaning and Exploratory Data Analysis (EDA)**
 1. `00_Data_Check.Rmd`
 2. `01_Data_Columns.Rmd`
